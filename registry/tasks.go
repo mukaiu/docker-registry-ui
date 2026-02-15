@@ -105,7 +105,7 @@ func PurgeOldTags(client *Client, purgeDryRun bool, purgeIncludeRepos, purgeExcl
 			created := client.GetImageCreated(imageRef)
 			if created.IsZero() {
 				// Image manifest with zero creation time, e.g. cosign w/o --record-creation-timestamp
-				logger.Debugf("[%s] tag with zero creation time: %s", repo, tag)
+				logger.Warnf("[%s] tag with zero creation time: %s", repo, tag)
 				continue
 			}
 			repos[repo] = append(repos[repo], TagData{name: tag, created: created})

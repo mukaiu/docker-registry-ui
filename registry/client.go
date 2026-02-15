@@ -204,6 +204,12 @@ func (c *Client) GetImageInfo(imageRef string) (ImageInfo, error) {
 		return ImageInfo{}, err
 	}
 
+	// Performance notes:
+	//   puller.Get() → 1 API call (fetches manifest)
+	//   descr.Image() → 0 API calls (type conversion)
+	//   img.ConfigFile() → 1 API call (fetches config blob)
+	//   img.Manifest() → 0 API calls (already fetched on puller.Get())
+	//
 	if ii.IsImage {
 		img, err := descr.Image()
 		if err != nil {
@@ -216,6 +222,9 @@ func (c *Client) GetImageInfo(imageRef string) (ImageInfo, error) {
 			return ImageInfo{}, err
 		}
 		ii.Created = cfg.Created.Time
+		if cfg.Created.Time.IsZero() {
+			ii.Created = extractCreatedFromAnnotations(img)
+		}
 		ii.Platforms = getPlatform(cfg.Platform())
 		ii.ConfigFile = structToMap(cfg)
 		// ImageID is what is shown in the terminal when doing "docker images".
@@ -289,7 +298,26 @@ func (c *Client) GetImageCreated(imageRef string) time.Time {
 		c.logger.Errorf("Cannot fetch ConfigFile for image reference %s: %s", imageRef, err)
 		return *zeroTime
 	}
+	if cfg.Created.Time.IsZero() {
+		return extractCreatedFromAnnotations(img)
+	}
+
 	return cfg.Created.Time
+}
+
+func extractCreatedFromAnnotations(img v1.Image) time.Time {
+	// cosign pushes images with zero time in the image config file.
+	// However, when cosign is used with --record-creation-timestamp it sets creation time
+	// into Manifest > annotations > org.opencontainers.image.created which can be used.
+	zeroTime := new(time.Time)
+	if mf, err := img.Manifest(); err == nil && mf.Annotations != nil {
+		if createdStr, ok := mf.Annotations["org.opencontainers.image.created"]; ok {
+			if createdTime, err := time.Parse(time.RFC3339, createdStr); err == nil {
+				return createdTime
+			}
+		}
+	}
+	return *zeroTime
 }
 
 // SubRepoTagCounts return map with tag counts according to the provided list of repos/sub-repos etc.
