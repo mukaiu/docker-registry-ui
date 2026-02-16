@@ -10,12 +10,20 @@ performance:
   catalog_page_size: 100
 
   # Catalog (repo list) refresh interval in minutes.
-  # If set to 0 it will never refresh but will run once.
-  catalog_refresh_interval: 10
+  # If set to 0 it will never refresh but will run once initially.
+  catalog_refresh_interval: 60
 
-  # Tags counting refresh interval in minutes.
-  # If set to 0 it will never run. This is fast operation.
-  tags_count_refresh_interval: 60
+  # Tags refresh interval in minutes (background job that caches all tags).
+  # If set to 0, background refresh is disabled and tags will always be
+  # refreshed online when browsing (ignoring tags_online_refresh_max_count).
+  tags_async_refresh_interval: 360
+
+  # Max tags per repo to allow refreshing tags online when browsing.
+  # If repo has fewer tags than this limit, tags will be fetched fresh on page load.
+  # If repo has more tags, it will use cached tags from background job.
+  # Set to 0 to always use cache (no online refresh).
+  # Note: This setting is ignored when tags_async_refresh_interval=0 so you can ever browse tags.
+  tags_online_refresh_max_count: 1000
 
 # Registry endpoint and authentication.
 registry:

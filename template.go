@@ -71,6 +71,13 @@ func setupRenderer(basePath string) *Template {
 		}
 		return t.In(time.Local).Format("2006-01-02 15:04:05 MST")
 	})
+	view.AddGlobal("pretty_duration", func(val interface{}) string {
+		d := val.(time.Duration)
+		if d < time.Second {
+			return fmt.Sprintf("%dms", d.Milliseconds())
+		}
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	})
 	view.AddGlobal("sort_map_keys", func(m interface{}) []string {
 		return registry.SortedMapKeys(m)
 	})

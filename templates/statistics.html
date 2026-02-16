@@ -1,0 +1,135 @@
+{{extends "base.html"}}
+{{import "breadcrumb.html"}}
+
+{{block head()}}
+{{end}}
+
+{{block body()}}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb rounded shadow-sm">
+        {{ yield breadcrumb() }}
+        <li class="breadcrumb-item active" aria-current="page"><strong>Statistics</strong></li>
+    </ol>
+</nav>
+
+{{if eventsAllowed}}
+<div class="row g-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm text-center">
+            <div class="card-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <h5 class="mb-0"><i class="bi bi-folder2 me-2"></i>Repositories</h5>
+            </div>
+            <div class="card-body py-4">
+                {{if repoCount > 0}}
+                <h1 class="display-4 fw-bold text-primary">{{ repoCount }}</h1>
+                {{else}}
+                <p class="text-muted mb-0">Loading in the background...</p>
+                {{end}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm text-center">
+            <div class="card-header" style="background: linear-gradient(135deg, #65a30d 0%, #4d7c0f 100%); color: white;">
+                <h5 class="mb-0"><i class="bi bi-tags me-2"></i>Tags</h5>
+            </div>
+            <div class="card-body py-4">
+                {{if tagCount > 0}}
+                <h1 class="display-4 fw-bold text-success">{{ tagCount }}</h1>
+                {{else}}
+                <p class="text-muted mb-0">Loading in the background...</p>
+                {{end}}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm text-center">
+            <div class="card-header" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Event Log Entries</h5>
+            </div>
+            <div class="card-body py-4">
+                <h1 class="display-4 fw-bold text-info">{{ eventCount }}</h1>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mt-4">
+    <div class="card-header" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+        <h5 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Background Jobs</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Job</th>
+                        <th>Last Run</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><i class="bi bi-folder2 text-primary me-2"></i>Catalog Refresh</td>
+                        {{if !catalogJobInfo.LastRun.IsZero()}}
+                        <td><span class="text-muted small">{{ catalogJobInfo.LastRun|pretty_time }}</span></td>
+                        <td><span class="badge bg-secondary">{{ catalogJobInfo.Duration|pretty_duration }}</span></td>
+                        {{else}}
+                        <td colspan="2"><span class="text-muted small">Not yet run</span></td>
+                        {{end}}
+                    </tr>
+                    <tr>
+                        <td><i class="bi bi-tags text-success me-2"></i>Tags Refresh</td>
+                        {{if !tagsJobInfo.LastRun.IsZero()}}
+                        <td><span class="text-muted small">{{ tagsJobInfo.LastRun|pretty_time }}</span></td>
+                        <td><span class="badge bg-secondary">{{ tagsJobInfo.Duration|pretty_duration }}</span></td>
+                        {{else}}
+                        <td colspan="2"><span class="text-muted small">Not yet run</span></td>
+                        {{end}}
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{{if len(topRepos) > 0}}
+<div class="card shadow-sm mt-4">
+    <div class="card-header" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);">
+        <h5 class="mb-0" style="color: #333;"><i class="bi bi-trophy me-2"></i>Top 10 Repositories by Tag Count</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th width="5%">#</th>
+                        <th>Repository</th>
+                        <th width="15%">Tags</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range i, r := topRepos}}
+                    <tr>
+                        <td class="text-muted">{{ i+1 }}</td>
+                        <td>
+                            <i class="bi bi-folder2 text-primary me-2"></i>
+                            <a href="{{ basePath }}/{{ r.Repo }}" class="text-decoration-none fw-semibold">{{ r.Repo }}</a>
+                        </td>
+                        <td><span class="badge bg-secondary">{{ r.Count }}</span></td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}
+{{else}}
+<div class="alert alert-warning text-center" role="alert">
+    <i class="bi bi-exclamation-triangle fs-1"></i>
+    <h4 class="mt-3">Access Denied</h4>
+    <p>User "{{user}}" is not permitted to view Statistics.</p>
+</div>
+{{end}}
+{{end}}

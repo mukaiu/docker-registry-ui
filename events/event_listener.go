@@ -176,6 +176,24 @@ func (e *EventListener) GetEvents(repository string) []EventRow {
 	return events
 }
 
+// GetEventCount returns the total number of events in the database.
+func (e *EventListener) GetEventCount() int {
+	db, err := e.getDatabaseHandler()
+	if err != nil {
+		e.logger.Error(err)
+		return 0
+	}
+	defer db.Close()
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM events").Scan(&count)
+	if err != nil {
+		e.logger.Error("Error counting events: ", err)
+		return 0
+	}
+	return count
+}
+
 func (e *EventListener) getDatabaseHandler() (*sql.DB, error) {
 	firstRun := false
 	schema := schemaSQLite

@@ -1,5 +1,17 @@
 ## Changelog
 
+## 0.12.0 (2026-02-16)
+
+* Improved performance of tags loading by caching tags in memory via background job. Repos with many tags (thousands+) no longer cause timeouts when browsing.
+* Added `performance.tags_online_refresh_max_count` config option to control which repos get fresh tags on page load vs using cached tags.
+* **BREAKING** Renamed config option `performance.tags_count_refresh_interval` to `performance.tags_async_refresh_interval`. It is now refreshing not just counts but all tags (it was doing that previously but not preserving in the cache). Default changed from 60 to 360 minutes.
+* **BREAKING** Internal routes moved to `/__` namespace (e.g. `/event-log` → `/__event-log`, `/delete-tag` → `/__delete-tag`). Update any reverse proxy rules or bookmarks accordingly.
+* Changed default `catalog_refresh_interval` from 10 to 60 minutes.
+* Added Statistics page with background job info (last run time and duration).
+* Added Options page to view current configuration settings.
+* Fallback to the manifest annotation `org.opencontainers.image.created` when the image config has a zero creation time. Some tools (e.g. cosign without `--record-creation-timestamp`) produce images without a config timestamp but may still include it as an annotation. This helps to set up purging of signature tags based on retention.
+* Upgrade Go and all dependencies.
+
 ## 0.11.0 (2025-11-27)
 
 * Major UI rewrite.

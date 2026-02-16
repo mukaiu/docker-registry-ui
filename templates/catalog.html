@@ -18,6 +18,7 @@
             }
         });
 
+        var areTagsReady = {{ areTagsReady }};
         var tagsTable = $('#datatable_tags').DataTable({
             "pageLength": 10,
             "order": [[ 0, 'desc' ]],
@@ -27,7 +28,7 @@
               { type: 'natural', targets: 0 }
             ],
             "language": {
-                "emptyTable": "No tags.",
+                "emptyTable": areTagsReady ? "No tags." : "Tags are being loaded in the background...",
                 "info": "Showing _START_ to _END_ of _TOTAL_",
                 "infoFiltered": " (filtered from _MAX_)",
                 "infoEmpty": "Showing 0 entries"
@@ -57,6 +58,11 @@
             reposTable.search('').draw();
             tagsTable.search('').draw();
             $(this).hide();
+        });
+
+        // Initialize Bootstrap tooltips
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) {
+            new bootstrap.Tooltip(el);
         });
 
         function populateConfirmation()  {
@@ -123,10 +129,14 @@
 </div>
 {{end}} {* end repos *}
 
-{{if len(tags)>0}}
+{{if showTags}}
 <div class="card shadow-sm mb-4">
     <div class="card-header" style="background: linear-gradient(135deg, #65a30d 0%, #4d7c0f 100%); color: white;">
-        <h5 class="mb-0"><i class="bi bi-tags me-2"></i>Tags</h5>
+        <h5 class="mb-0"><i class="bi bi-tags me-2"></i>Tags
+            {{if tagsRefreshInfo != ""}}
+            <i class="bi bi-info-circle ms-2" style="font-size: 0.8rem; opacity: 0.8;" data-bs-toggle="tooltip" data-bs-placement="right" data-bs-title="{{ tagsRefreshInfo }}"></i>
+            {{end}}
+        </h5>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -146,7 +156,7 @@
                                     <a href="{{ basePath }}/{{ repoPath }}:{{ tag }}" class="text-decoration-none fw-semibold">{{ tag }}</a>
                                 </div>
                                 {{if deleteAllowed}}
-                                <a href="{{ basePath }}/delete-tag?repoPath={{ repoPath }}&tag={{ tag }}"
+                                <a href="{{ basePath }}/__delete-tag?repoPath={{ repoPath }}&tag={{ tag }}"
                                    data-bs-toggle="confirmation"
                                    class="btn btn-outline-danger btn-sm"
                                    role="button">

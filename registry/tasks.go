@@ -95,7 +95,7 @@ func PurgeOldTags(client *Client, purgeDryRun bool, purgeIncludeRepos, purgeExcl
 	repos := map[string]timeSlice{}
 	count := 0
 	for _, repo := range catalog {
-		tags := client.ListTags(repo)
+		tags := client.FetchAndCacheTagsForRepo(repo)
 		if len(tags) == 0 {
 			continue
 		}
@@ -104,7 +104,7 @@ func PurgeOldTags(client *Client, purgeDryRun bool, purgeIncludeRepos, purgeExcl
 			imageRef := repo + ":" + tag
 			created := client.GetImageCreated(imageRef)
 			if created.IsZero() {
-				// Image manifest with zero creation time, e.g. cosign w/o --record-creation-timestamp
+				// Image manifest with zero creation time
 				logger.Warnf("[%s] tag with zero creation time: %s", repo, tag)
 				continue
 			}

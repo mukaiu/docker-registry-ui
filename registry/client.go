@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,16 +19,24 @@ import (
 
 const userAgent = "registry-ui"
 
+// JobInfo stores the last run time and duration of a background job.
+type JobInfo struct {
+	LastRun  time.Time
+	Duration time.Duration
+}
+
 // Client main class.
 type Client struct {
 	puller         *remote.Puller
 	pusher         *remote.Pusher
 	logger         *logrus.Entry
 	repos          []string
-	tagCountsMux   sync.Mutex
-	tagCounts      map[string]int
+	tagsCache      map[string][]string
+	tagsCacheMux   sync.RWMutex
 	isCatalogReady bool
 	nameOptions    []name.Option
+	catalogJobInfo JobInfo
+	tagsJobInfo    JobInfo
 }
 
 type ImageInfo struct {
@@ -86,7 +95,7 @@ func NewClient() *Client {
 		pusher:      pusher,
 		logger:      SetupLogging("registry.client"),
 		repos:       []string{},
-		tagCounts:   map[string]int{},
+		tagsCache:   map[string][]string{},
 		nameOptions: nameOptions,
 	}
 	return c
@@ -94,13 +103,13 @@ func NewClient() *Client {
 
 func (c *Client) StartBackgroundJobs() {
 	catalogInterval := viper.GetInt("performance.catalog_refresh_interval")
-	tagsCountInterval := viper.GetInt("performance.tags_count_refresh_interval")
+	tagsRefreshInterval := viper.GetInt("performance.tags_async_refresh_interval")
 	isStarted := false
 	for {
 		c.RefreshCatalog()
-		if !isStarted && tagsCountInterval > 0 {
+		if !isStarted && tagsRefreshInterval > 0 {
 			// Start after the first catalog refresh
-			go c.CountTags(tagsCountInterval)
+			go c.RefreshTags(tagsRefreshInterval)
 			isStarted = true
 		}
 		if catalogInterval == 0 {
@@ -147,7 +156,8 @@ func (c *Client) RefreshCatalog() {
 		c.logger.Warn("[RefreshCatalog] Catalog looks empty, preserving previous list if any.")
 	}
 	c.logger.Debugf("[RefreshCatalog] Catalog: %s", c.repos)
-	c.logger.Infof("[RefreshCatalog] Job complete (%v): %d repos found", time.Since(start), len(c.repos))
+	c.catalogJobInfo = JobInfo{LastRun: time.Now(), Duration: time.Since(start)}
+	c.logger.Infof("[RefreshCatalog] Job complete (%v): %d repos found", c.catalogJobInfo.Duration, len(c.repos))
 	c.isCatalogReady = true
 }
 
@@ -161,17 +171,63 @@ func (c *Client) GetRepos() []string {
 	return c.repos
 }
 
-// ListTags get tags for the repo
-func (c *Client) ListTags(repoName string) []string {
+// GetJobInfo returns the last run info for background jobs.
+func (c *Client) GetJobInfo() (catalog, tags JobInfo) {
+	return c.catalogJobInfo, c.tagsJobInfo
+}
+
+// ListTags get tags for the repo, returns tags and whether they were cached.
+// If online refresh is enabled and tag count is below threshold, fetches fresh tags.
+// If background refresh is disabled, always fetches online regardless of max count.
+func (c *Client) ListTags(repoName string) ([]string, bool) {
+	c.tagsCacheMux.RLock()
+	cachedTags, exists := c.tagsCache[repoName]
+	tagCount := len(cachedTags)
+	c.tagsCacheMux.RUnlock()
+
+	maxCount := viper.GetInt("performance.tags_online_refresh_max_count")
+	asyncRefreshInterval := viper.GetInt("performance.tags_async_refresh_interval")
+
+	// If background refresh is disabled, always refresh online.
+	// If online refresh is enabled and repo is cached and below threshold, refresh online.
+	if asyncRefreshInterval == 0 || (maxCount > 0 && exists && tagCount <= maxCount) {
+		if tags := c.FetchAndCacheTagsForRepo(repoName); tags != nil {
+			return tags, true
+		}
+		return []string{}, false
+	}
+
+	// Return from cache if exists
+	if exists {
+		return cachedTags, true
+	}
+
+	// Return empty array if not cached yet
+	return []string{}, false
+}
+
+// FetchAndCacheTagsForRepo fetch and cache tags for a specific repo
+func (c *Client) FetchAndCacheTagsForRepo(repoName string) []string {
 	ctx := context.Background()
-	repo, _ := name.NewRepository(viper.GetString("registry.hostname")+"/"+repoName, c.nameOptions...)
+
+	repo, err := name.NewRepository(viper.GetString("registry.hostname")+"/"+repoName, c.nameOptions...)
+	if err != nil {
+		c.logger.Errorf("Error creating repo reference for %s: %s", repoName, err)
+		return nil
+	}
+
 	tags, err := c.puller.List(ctx, repo)
 	if err != nil {
 		c.logger.Errorf("Error listing tags for repo %s: %s", repoName, err)
+		return nil
 	}
-	c.tagCountsMux.Lock()
-	c.tagCounts[repoName] = len(tags)
-	c.tagCountsMux.Unlock()
+
+	// Update cache
+	c.tagsCacheMux.Lock()
+	c.tagsCache[repoName] = tags
+	c.tagsCacheMux.Unlock()
+
+	c.logger.Debugf("Cached %d tags for repo %s", len(tags), repoName)
 	return tags
 }
 
@@ -306,9 +362,10 @@ func (c *Client) GetImageCreated(imageRef string) time.Time {
 }
 
 func extractCreatedFromAnnotations(img v1.Image) time.Time {
-	// cosign pushes images with zero time in the image config file.
-	// However, when cosign is used with --record-creation-timestamp it sets creation time
-	// into Manifest > annotations > org.opencontainers.image.created which can be used.
+	// Some tools (e.g. cosign without --record-creation-timestamp) produce images
+	// with a zero creation time in the config file. As a fallback, try to extract
+	// the creation date from the manifest annotation "org.opencontainers.image.created".
+	// See https://specs.opencontainers.org/image-spec/annotations/
 	zeroTime := new(time.Time)
 	if mf, err := img.Manifest(); err == nil && mf.Annotations != nil {
 		if createdStr, ok := mf.Annotations["org.opencontainers.image.created"]; ok {
@@ -318,6 +375,43 @@ func extractCreatedFromAnnotations(img v1.Image) time.Time {
 		}
 	}
 	return *zeroTime
+}
+
+// GetTotalTagCount returns the total number of tags across all cached repos.
+func (c *Client) GetTotalTagCount() int {
+	c.tagsCacheMux.RLock()
+	defer c.tagsCacheMux.RUnlock()
+
+	total := 0
+	for _, tags := range c.tagsCache {
+		total += len(tags)
+	}
+	return total
+}
+
+// RepoTagCount represents a repo and its tag count.
+type RepoTagCount struct {
+	Repo  string
+	Count int
+}
+
+// GetTopReposByTagCount returns the top N repos sorted by tag count descending.
+func (c *Client) GetTopReposByTagCount(n int) []RepoTagCount {
+	c.tagsCacheMux.RLock()
+	result := make([]RepoTagCount, 0, len(c.tagsCache))
+	for repo, tags := range c.tagsCache {
+		result = append(result, RepoTagCount{Repo: repo, Count: len(tags)})
+	}
+	c.tagsCacheMux.RUnlock()
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Count > result[j].Count
+	})
+
+	if len(result) > n {
+		result = result[:n]
+	}
+	return result
 }
 
 // SubRepoTagCounts return map with tag counts according to the provided list of repos/sub-repos etc.
@@ -330,26 +424,27 @@ func (c *Client) SubRepoTagCounts(repoPath string, repos []string) map[string]in
 		}
 
 		// Acquire lock to prevent concurrent map iteration and map write.
-		c.tagCountsMux.Lock()
-		for k, v := range c.tagCounts {
+		c.tagsCacheMux.RLock()
+		for k, v := range c.tagsCache {
 			if k == subRepo || strings.HasPrefix(k, subRepo+"/") {
-				counts[subRepo] = counts[subRepo] + v
+				counts[subRepo] = counts[subRepo] + len(v)
 			}
 		}
-		c.tagCountsMux.Unlock()
+		c.tagsCacheMux.RUnlock()
 	}
 	return counts
 }
 
-// CountTags count repository tags in background regularly.
-func (c *Client) CountTags(interval int) {
+// RefreshTags fetch repository tags in background periodically and cache them.
+func (c *Client) RefreshTags(interval int) {
 	for {
 		start := time.Now()
-		c.logger.Info("[CountTags] Started counting tags...")
+		c.logger.Info("[RefreshTags] Started caching tags for all repositories...")
 		for _, r := range c.repos {
-			c.ListTags(r)
+			c.FetchAndCacheTagsForRepo(r)
 		}
-		c.logger.Infof("[CountTags] Job complete (%v).", time.Since(start))
+		c.tagsJobInfo = JobInfo{LastRun: time.Now(), Duration: time.Since(start)}
+		c.logger.Infof("[RefreshTags] Job complete (%v).", c.tagsJobInfo.Duration)
 		time.Sleep(time.Duration(interval) * time.Minute)
 	}
 }
@@ -384,8 +479,18 @@ func (c *Client) DeleteTag(repoPath, tag string) {
 		c.logger.Errorf("Error deleting image %s: %s", imageRef, err)
 		return
 	}
-	c.tagCountsMux.Lock()
-	c.tagCounts[repoPath]--
-	c.tagCountsMux.Unlock()
+	// Remove tag from cache
+	c.tagsCacheMux.Lock()
+	if cachedTags, exists := c.tagsCache[repoPath]; exists {
+		updatedTags := []string{}
+		for _, t := range cachedTags {
+			if t != tag {
+				updatedTags = append(updatedTags, t)
+			}
+		}
+		c.tagsCache[repoPath] = updatedTags
+	}
+	c.tagsCacheMux.Unlock()
+
 	c.logger.Infof("Image %s has been successfully deleted.", imageRef)
 }

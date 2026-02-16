@@ -90,8 +90,10 @@ func main() {
 	}
 	p.GET("/", a.viewCatalog)
 	p.GET("/:repoPath", a.viewCatalog)
-	p.GET("/event-log", a.viewEventLog)
-	p.GET("/delete-tag", a.deleteTag)
+	p.GET("/__event-log", a.viewEventLog)
+	p.GET("/__statistics", a.viewStatistics)
+	p.GET("/__options", a.viewOptions)
+	p.GET("/__delete-tag", a.deleteTag)
 
 	// Protected event listener.
 	pp := e.Group("/event-receiver")

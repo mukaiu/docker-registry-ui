@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/CloudyKit/jet/v6"
@@ -70,12 +71,27 @@ func (a *apiClient) viewCatalog(c echo.Context) error {
 		// Show repos, tags or both.
 		repos = registry.UniqueSortedSlice(repos)
 		tags := []string{}
+		areTagsReady := false
+		tagsRefreshInfo := ""
 		if showTags {
-			tags = a.client.ListTags(repoPath)
-
+			tags, areTagsReady = a.client.ListTags(repoPath)
+			asyncInterval := viper.GetInt("performance.tags_async_refresh_interval")
+			maxCount := viper.GetInt("performance.tags_online_refresh_max_count")
+			if asyncInterval == 0 {
+				tagsRefreshInfo = "Tags for this repo are refreshed online when browsing."
+			} else if maxCount == 0 {
+				tagsRefreshInfo = fmt.Sprintf("Tags for this repo are refreshed in the background every %d min.", asyncInterval)
+			} else if len(tags) <= maxCount {
+				tagsRefreshInfo = fmt.Sprintf("Tags for this repo are refreshed in the background every %d min and online when browsing.", asyncInterval)
+			} else {
+				tagsRefreshInfo = fmt.Sprintf("Tags for this repo are refreshed in the background every %d min. Online refresh is disabled (tag count exceeds %d).", asyncInterval, maxCount)
+			}
 		}
 		data.Set("repos", repos)
+		data.Set("showTags", showTags)
 		data.Set("isCatalogReady", a.client.IsCatalogReady())
+		data.Set("areTagsReady", areTagsReady)
+		data.Set("tagsRefreshInfo", tagsRefreshInfo)
 		data.Set("tagCounts", a.client.SubRepoTagCounts(repoPath, repos))
 		data.Set("tags", tags)
 		if repoPath != "" && (len(repos) > 0 || len(tags) > 0) {
@@ -103,6 +119,72 @@ func (a *apiClient) viewEventLog(c echo.Context) error {
 	data := a.setUserPermissions(c)
 	data.Set("events", a.eventListener.GetEvents(""))
 	return c.Render(http.StatusOK, "event_log.html", data)
+}
+
+// viewStatistics view registry statistics.
+func (a *apiClient) viewStatistics(c echo.Context) error {
+	data := a.setUserPermissions(c)
+	data.Set("isCatalogReady", a.client.IsCatalogReady())
+	data.Set("repoCount", len(a.client.GetRepos()))
+	data.Set("tagCount", a.client.GetTotalTagCount())
+	data.Set("eventCount", a.eventListener.GetEventCount())
+	data.Set("topRepos", a.client.GetTopReposByTagCount(10))
+	catalogJobInfo, tagsJobInfo := a.client.GetJobInfo()
+	data.Set("catalogJobInfo", catalogJobInfo)
+	data.Set("tagsJobInfo", tagsJobInfo)
+	return c.Render(http.StatusOK, "statistics.html", data)
+}
+
+type configSection struct {
+	Name    string
+	Options [][2]string // key, value pairs
+}
+
+// viewOptions view configuration options.
+func (a *apiClient) viewOptions(c echo.Context) error {
+	data := a.setUserPermissions(c)
+
+	sensitiveKeys := map[string]bool{
+		"registry.password":                true,
+		"registry.password_file":           true,
+		"event_listener.bearer_token":      true,
+		"event_listener.database_location": true,
+	}
+
+	settings := viper.AllSettings()
+	sectionMap := map[string][][2]string{}
+	for sectionName, v := range settings {
+		if nested, ok := v.(map[string]interface{}); ok {
+			keys := make([]string, 0, len(nested))
+			for k := range nested {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				val := fmt.Sprintf("%v", nested[k])
+				if sensitiveKeys[sectionName+"."+k] {
+					val = "***"
+				}
+				sectionMap[sectionName] = append(sectionMap[sectionName], [2]string{k, val})
+			}
+		} else {
+			sectionMap["general"] = append(sectionMap["general"], [2]string{sectionName, fmt.Sprintf("%v", v)})
+		}
+	}
+
+	sectionNames := make([]string, 0, len(sectionMap))
+	for name := range sectionMap {
+		sectionNames = append(sectionNames, name)
+	}
+	sort.Strings(sectionNames)
+
+	sections := make([]configSection, 0, len(sectionNames))
+	for _, name := range sectionNames {
+		sections = append(sections, configSection{Name: name, Options: sectionMap[name]})
+	}
+
+	data.Set("sections", sections)
+	return c.Render(http.StatusOK, "options.html", data)
 }
 
 // receiveEvents receive events.
