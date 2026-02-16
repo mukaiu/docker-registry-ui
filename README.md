@@ -14,7 +14,7 @@ Docker image: [quiq/registry-ui](https://hub.docker.com/r/quiq/registry-ui/tags/
 - Event listener to capture registry notifications, stored in SQLite or MySQL
 - Built-in CLI for tag retention: purge tags older than X days while keeping at least Y tags
 - Auto-discovery of authentication methods (basic auth, token service, keychain, etc.)
-- Repository list and tag counts are cached and refreshed in the background
+- Repository list and tags are cached and refreshed in the background
 
 > **Note:** The UI does not handle TLS or authentication. Place it behind a reverse proxy such as nginx, oauth2_proxy, or similar.
 
@@ -22,17 +22,19 @@ Docker image: [quiq/registry-ui](https://hub.docker.com/r/quiq/registry-ui/tags/
 
 Start a Docker registry on your host (if you don't already have one):
 
-    docker run -d --network host \
-        --name registry registry:2
+    docker run -d --network host --name registry registry
 
-Then run Registry UI:
+Push any image to `127.0.0.1:5000/owner/name`:
 
-    docker run -d --network host \
+    docker tag alpine:edge 127.0.0.1:5000/owner/name
+    docker push 127.0.0.1:5000/owner/name
+
+Run Registry UI and open http://127.0.0.1:8000 in your browser:
+
+    docker run --rm --network host \
         -e REGISTRY_HOSTNAME=127.0.0.1:5000 \
         -e REGISTRY_INSECURE=true \
         --name registry-ui quiq/registry-ui
-
-Push any image to `127.0.0.1:5000/owner/name` and open http://127.0.0.1:8000 in your browser.
 
 ### Configuration
 
